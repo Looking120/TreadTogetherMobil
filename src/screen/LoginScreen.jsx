@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -6,8 +6,7 @@ import {
   ScrollView, 
   Alert,
   StyleSheet,
-  TouchableOpacity,
-  Platform
+  TouchableOpacity
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -26,67 +25,127 @@ const LoginScreen = () => {
   const logo = require('../../assets/images/Logo.png');
   const backgroundImage = require('../../assets/background/overlay_4.jpg');
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Erreur', 'Veuillez remplir tous les champs');
-      return;
+  // Validation des champs
+  const validateForm = useCallback(() => {
+    if (!email.trim()) {
+      setError('Veuillez entrer votre email');
+      return false;
     }
+    
+    if (!password.trim()) {
+      setError('Veuillez entrer votre mot de passe');
+      return false;
+    }
+    
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Veuillez entrer un email valide');
+      return false;
+    }
+    
+    setError('');
+    return true;
+  }, [email, password]);
 
+  // Gestion de la connexion
+  const handleLogin = useCallback(async () => {
+    if (!validateForm()) return;
+    
     setLoading(true);
-
+    
     try {
-      await signIn(email, password);
-      navigation.navigate('Home');
+      console.log('Tentative de connexion avec:', email);
+      const response = await signIn(email, password);
+      
+      console.log('Connexion réussie:', response);
+      
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Home' }],
+      });
+      
     } catch (error) {
-      Alert.alert('Erreur', error.message || 'Échec de la connexion');
+      console.error('Échec de la connexion:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      });
+      
+      let errorMessage = 'Une erreur est survenue';
+      
+      if (error.message.includes('Network request failed')) {
+        errorMessage = 'Problème de connexion. Vérifiez votre internet.';
+      } else if (error.message.includes('401')) {
+        errorMessage = 'Email ou mot de passe incorrect';
+      } else if (error.message.includes('400')) {
+        errorMessage = 'Requête invalide. Vérifiez vos informations.';
+      }
+      
+      setError(errorMessage);
+      Alert.alert('Erreur', errorMessage);
     } finally {
       setLoading(false);
     }
-  };
+  }, [email, password, navigation, validateForm]);
 
   return (
     <ImageBackground
       source={backgroundImage}
       style={styles.background}
       blurRadius={5}
+      resizeMode="cover"
     >
       <ScrollView 
-        contentContainerStyle={styles.container}
+        contentContainerStyle={styles.scrollContainer}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>
           <AuthLogo logoSource={logo} size={120} />
           
-          <Text style={styles.title}>login</Text>
+          <Text style={styles.title}>Connexion</Text>
 
           <AuthInput
-            placeholder="e-mail address"
+            placeholder="Adresse email"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+              setEmail(text);
+              setError('');
+            }}
             keyboardType="email-address"
             autoCapitalize="none"
+            autoComplete="email"
+            textContentType="emailAddress"
           />
 
           <AuthInput
-            placeholder="Password"
+            placeholder="Mot de passe"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(text) => {
+              setPassword(text);
+              setError('');
+            }}
             secureTextEntry
+            autoComplete="password"
+            textContentType="password"
           />
 
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {error ? (
+            <Text style={styles.errorText}>{error}</Text>
+          ) : null}
 
           <AuthButton
-            title={loading ? "connecting..." : "log in"}
+            title={loading ? "Connexion en cours..." : "Se connecter"}
             onPress={handleLogin}
             loading={loading}
             disabled={!email || !password || loading}
           />
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>No account? </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>
-              <Text style={styles.footerLink}>sign up</Text>
+            <Text style={styles.footerText}>Pas de compte ? </Text>
+            <TouchableOpacity 
+              onPress={() => navigation.navigate('SignUp')}
+              disabled={loading}
+            >
+              <Text style={styles.footerLink}>S'inscrire</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -110,10 +169,8 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 400,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 12,
     padding: 25,
-
   },
   title: {
     fontSize: 30,

@@ -1,57 +1,75 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import axios from 'axios';
 
-const API_BASE_URL = Platform.select({
-  ios: 'http://localhost:7294/api',
-  android: 'http://10.0.2.2:7294/api'
+// Configuration de l'instance Axios
+const apiClient = axios.create({
+  baseURL: __DEV__ ? 'http://192.168.0.1:7294/api' : 'https://votre-api-production.com/api',
+  timeout: 10000, // 10 secondes timeout
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  }
 });
 
-export const signIn = async (email, password) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/auth/signin`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ 
+export const authService = {
+  signIn: async (email, password) => {
+    try {
+      console.log(`Tentative de connexion à: ${apiClient.defaults.baseURL}/auth/signin`);
+
+      const response = await apiClient.post('/auth/signin', {
         email: email.trim(),
         password: password.trim()
-      }),
-    });
+      });
 
-    const data = await response.json();
+      // Si la réponse est réussie
+      const { accessToken, user } = response.data;
+      
+      await AsyncStorage.multiSet([
+        ['userToken', accessToken],
+        ['user', JSON.stringify(user)]
+      ]);
 
-    if (!response.ok) {
-      throw new Error(data.message || 'Échec de la connexion');
+      return response.data;
+    } catch (error) {
+      console.error('Erreur de connexion:', {
+        message: error.message,
+        response: error.response?.data,
+        code: error.code
+      });
+
+      let errorMessage = 'Impossible de se connecter au serveur';
+      
+      if (error.response) {
+        // Erreur avec réponse du serveur
+        errorMessage = error.response.data?.message || 
+                       `Erreur ${error.response.status}: ${error.response.statusText}`;
+      } else if (error.request) {
+        // La requête a été faite mais aucune réponse n'a été reçue
+        errorMessage = 'Pas de réponse du serveur. Vérifiez votre connexion.';
+      }
+
+      throw new Error(errorMessage);
     }
+  },
 
-    await AsyncStorage.multiSet([
-      ['user', JSON.stringify(data.user)],
-      ['token', data.accessToken]
-    ]);
+  // Méthode pour ajouter le token aux requêtes suivantes
+  setAuthToken: async () => {
+    const token = await AsyncStorage.getItem('userToken');
+    if (token) {
+      apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    } else {
+      delete apiClient.defaults.headers.common['Authorization'];
+    }
+  },
 
-    return data;
-  } catch (error) {
-    console.error('Login error:', error);
-    throw error;
+  // Méthode pour se déconnecter
+  signOut: async () => {
+    await AsyncStorage.multiRemove(['userToken', 'user']);
+    delete apiClient.defaults.headers.common['Authorization'];
   }
 };
 
-export const signOut = async () => {
-  try {
-    await AsyncStorage.multiRemove(['user', 'token']);
-  } catch (error) {
-    console.error('Logout error:', error);
-    throw error;
-  }
-};
-
-export const getCurrentUser = async () => {
-  try {
-    const user = await AsyncStorage.getItem('user');
-    return user ? JSON.parse(user) : null;
-  } catch (error) {
-    console.error('Get user error:', error);
-    throw error;
-  }
-};
+// Initialisation du token au démarrage
+(async () => {
+  await authService.setAuthToken();
+})();
